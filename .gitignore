@@ -2,6 +2,8 @@ mail.json
 data/otp.json
 data/*.tmp
 functions/node_modules/
+__pycache__/
+*.pyc
 .firebase/
 firebase-debug.log
 **/*-debug.log
