@@ -1,0 +1,9 @@
+mail.json
+data/otp.json
+data/*.tmp
+functions/node_modules/
+.firebase/
+firebase-debug.log
+**/*-debug.log
+*-service-account*.json
+service-account*.json

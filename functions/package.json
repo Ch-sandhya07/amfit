@@ -1,0 +1,21 @@
+{
+  "name": "amfit-functions",
+  "private": true,
+  "main": "src/index.js",
+  "engines": {
+    "node": "20"
+  },
+  "scripts": {
+    "lint": "node --check src/index.js && node --check scripts/bootstrap-admin.js",
+    "bootstrap-admin": "node scripts/bootstrap-admin.js",
+    "test:rules": "npx --yes firebase-tools@14.17.0 emulators:exec --config ../firebase.json --project demo-amfit --only firestore,storage \"node test/rules.test.js\""
+  },
+  "dependencies": {
+    "firebase-admin": "^14.4.0",
+    "firebase-functions": "^7.4.0"
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "^4.0.1",
+    "firebase": "^11.0.0"
+  }
+}
