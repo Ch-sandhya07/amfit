@@ -1,0 +1,103 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return signedIn()
+        && 'admin' in request.auth.token
+        && request.auth.token.admin == true;
+    }
+
+    function isOwner(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    match /accounts/{uid} {
+      allow get: if isOwner(uid) || isAdmin();
+      allow list: if isAdmin();
+      allow create: if isOwner(uid)
+        && request.resource.data.email == request.auth.token.email
+        && request.resource.data.role == "user"
+        && request.resource.data.status == "active";
+      allow update: if isOwner(uid)
+        && request.resource.data.email == resource.data.email
+        && request.resource.data.role == resource.data.role
+        && request.resource.data.status == resource.data.status;
+      allow delete: if false;
+    }
+
+    match /users/{uid} {
+      allow read, create, update, delete: if isOwner(uid);
+
+      match /{document=**} {
+        allow read, create, update, delete: if isOwner(uid);
+      }
+    }
+
+    match /content/{document=**} {
+      allow read: if signedIn();
+    }
+
+    match /content/announcements {
+      allow create, update: if isAdmin()
+        && request.resource.data.text is string
+        && request.resource.data.text.size() <= 280;
+      allow delete: if isAdmin();
+    }
+
+    match /content/motivation {
+      allow create, update: if isAdmin()
+        && request.resource.data.lines is list
+        && request.resource.data.lines.size() <= 50;
+      allow delete: if isAdmin();
+    }
+
+    match /content/canteen {
+      allow create, update: if isAdmin()
+        && request.resource.data.keys is list
+        && request.resource.data.keys.size() <= 50;
+      allow delete: if isAdmin();
+    }
+
+    match /content/foods/items/{foodId} {
+      allow create, update: if isAdmin()
+        && foodId.matches('^[a-z0-9_]{1,80}$')
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && request.resource.data.name.size() <= 100
+        && request.resource.data.serving is string
+        && request.resource.data.serving.size() > 0
+        && request.resource.data.serving.size() <= 120
+        && request.resource.data.macros is map
+        && request.resource.data.macros.keys().hasAll(['kcal', 'protein', 'carbs', 'fat', 'fiber', 'sugar'])
+        && request.resource.data.macros.keys().hasOnly(['kcal', 'protein', 'carbs', 'fat', 'fiber', 'sugar'])
+        && request.resource.data.macros.kcal is number
+        && request.resource.data.macros.kcal >= 0
+        && request.resource.data.macros.kcal <= 10000
+        && request.resource.data.macros.protein is number
+        && request.resource.data.macros.protein >= 0
+        && request.resource.data.macros.protein <= 10000
+        && request.resource.data.macros.carbs is number
+        && request.resource.data.macros.carbs >= 0
+        && request.resource.data.macros.carbs <= 10000
+        && request.resource.data.macros.fat is number
+        && request.resource.data.macros.fat >= 0
+        && request.resource.data.macros.fat <= 10000
+        && request.resource.data.macros.fiber is number
+        && request.resource.data.macros.fiber >= 0
+        && request.resource.data.macros.fiber <= 10000
+        && request.resource.data.macros.sugar is number
+        && request.resource.data.macros.sugar >= 0
+        && request.resource.data.macros.sugar <= 10000;
+      allow delete: if isAdmin();
+    }
+
+    match /audit/{entry} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+  }
+}
