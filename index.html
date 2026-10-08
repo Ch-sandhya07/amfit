@@ -19,11 +19,23 @@
   <link rel="stylesheet" href="css/app.css">
 </head>
 <body>
+  <svg class="icon-sprite" aria-hidden="true">
+    <symbol id="i-home" viewBox="0 0 24 24"><path d="m3 11 9-8 9 8"/><path d="M5 10v10h14V10M9 20v-6h6v6"/></symbol>
+    <symbol id="i-train" viewBox="0 0 24 24"><path d="M6 7v10M3 9v6M18 7v10M21 9v6M6 12h12"/></symbol>
+    <symbol id="i-camera" viewBox="0 0 24 24"><path d="M4 7h4l2-3h4l2 3h4v13H4z"/><circle cx="12" cy="13" r="4"/></symbol>
+    <symbol id="i-log" viewBox="0 0 24 24"><path d="M6 3h12v18H6zM9 8h6M9 12h6M9 16h4"/></symbol>
+    <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c.8-5 3.5-7 8-7s7.2 2 8 7"/></symbol>
+    <symbol id="i-micros" viewBox="0 0 24 24"><path d="M12 21V10M12 14c-5 0-8-3-8-8 5 0 8 3 8 8ZM12 17c5 0 8-3 8-8-5 0-8 3-8 8Z"/></symbol>
+    <symbol id="i-progress" viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></symbol>
+    <symbol id="i-coffee" viewBox="0 0 24 24"><path d="M4 8h13v7a5 5 0 0 1-5 5H9a5 5 0 0 1-5-5zM17 10h2a3 3 0 0 1 0 6h-2M7 3v2M11 3v2M15 3v2"/></symbol>
+    <symbol id="i-reset" viewBox="0 0 24 24"><path d="M12 4v7M8 7l4 4 4-4M5 14c1 4 3 6 7 6s6-2 7-6"/></symbol>
+    <symbol id="i-week" viewBox="0 0 24 24"><path d="M4 5h16v15H4zM8 3v4M16 3v4M4 10h16M8 14h2M14 14h2"/></symbol>
+    <symbol id="i-energy" viewBox="0 0 24 24"><path d="m13 2-8 12h7l-1 8 8-12h-7z"/></symbol>
+    <symbol id="i-posture" viewBox="0 0 24 24"><circle cx="12" cy="5" r="3"/><path d="M12 8v7M5 11l7-3 7 3M12 15l-5 7M12 15l5 7"/></symbol>
+    <symbol id="i-style" viewBox="0 0 24 24"><path d="m8 4 4-2 4 2 5 5-3 3-2-2v12H8V10l-2 2-3-3z"/></symbol>
+    <symbol id="i-smile" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M8 14c2 3 6 3 8 0M9 9h.01M15 9h.01"/></symbol>
+  </svg>
   <div class="bg-fx" aria-hidden="true"><i></i><i></i><i></i></div>
-  <div class="bg-stickers" aria-hidden="true">
-    <span>🏋️</span><span>🥗</span><span>🔥</span><span>💧</span><span>👟</span>
-    <span>🥛</span><span>💪</span><span>🍋</span>
-  </div>
   <div class="app">
     <section id="screen-auth" class="screen on">
       <div class="hero">
@@ -32,9 +44,9 @@
         <p>Snap meals, undo desk posture, and build strength around stand-ups, releases, and office food.</p>
         <span class="pill">PRIVACY FIRST · NO PAID AI</span>
         <div class="workday-proof" aria-label="Workday features">
-          <span>☕ One-tap canteen</span>
-          <span>🪑 2-min desk reset</span>
-          <span>📊 Weekly wrap</span>
+          <span><svg class="icon"><use href="#i-coffee"></use></svg>One-tap canteen</span>
+          <span><svg class="icon"><use href="#i-reset"></use></svg>2-min desk reset</span>
+          <span><svg class="icon"><use href="#i-week"></use></svg>Weekly wrap</span>
         </div>
       </div>
       <div class="panel">
@@ -218,10 +230,10 @@
           <p>Movement, nourishing food and personal style can support energy, confidence and mood.</p>
         </div>
         <div class="benefit-stickers" aria-label="Everyday wellbeing benefits">
-          <span>🥗 Steadier energy</span>
-          <span>🏋️ Strong posture</span>
-          <span>✨ Self-expression</span>
-          <span>😊 Confidence</span>
+          <span><svg class="icon"><use href="#i-energy"></use></svg>Steadier energy</span>
+          <span><svg class="icon"><use href="#i-posture"></use></svg>Strong posture</span>
+          <span><svg class="icon"><use href="#i-style"></use></svg>Self-expression</span>
+          <span><svg class="icon"><use href="#i-smile"></use></svg>Confidence</span>
         </div>
         <div class="pose-strip" aria-label="Simple photo and style cues">
           <button type="button" data-style="posture">
@@ -262,8 +274,8 @@
         <div class="card" id="todayTrain"></div>
       </div>
       <div class="quick">
-        <button type="button" data-go="micros">Micros</button>
-        <button type="button" data-go="progress">Progress</button>
+        <button type="button" data-go="micros"><svg class="icon"><use href="#i-micros"></use></svg><span>Micros</span><small>Daily nutrients</small></button>
+        <button type="button" data-go="progress"><svg class="icon"><use href="#i-progress"></use></svg><span>Progress</span><small>Your trends</small></button>
       </div>
       <div class="section-h"><h3>Canteen</h3><span>one tap, no photo</span></div>
       <div class="card" style="margin:0 20px 4px;" id="quickCard"></div>
@@ -473,11 +485,11 @@
     </div>
 
     <nav class="nav hidden" id="nav">
-      <button data-go="home" class="on">Home</button>
-      <button data-go="train">Train</button>
-      <button class="snap" data-go="scan" title="Scan food">+</button>
-      <button data-go="history">Log</button>
-      <button data-go="you">You</button>
+      <button data-go="home" class="on"><svg class="icon"><use href="#i-home"></use></svg><span>Home</span></button>
+      <button data-go="train"><svg class="icon"><use href="#i-train"></use></svg><span>Train</span></button>
+      <button class="snap" data-go="scan" title="Scan food" aria-label="Scan food"><svg class="icon"><use href="#i-camera"></use></svg></button>
+      <button data-go="history"><svg class="icon"><use href="#i-log"></use></svg><span>Log</span></button>
+      <button data-go="you"><svg class="icon"><use href="#i-user"></use></svg><span>You</span></button>
     </nav>
   </div>
 
