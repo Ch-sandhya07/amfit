@@ -1,7 +1,10 @@
 mail.json
 data/otp.json
+data/admin.json
 data/*.tmp
 functions/node_modules/
+node_modules/
+www/
 __pycache__/
 *.pyc
 .firebase/

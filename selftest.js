@@ -7,6 +7,8 @@ const { execFileSync } = require("child_process");
 const SCRIPTS = [
   "js/foods.js",
   "js/foods-indian.js",
+  "js/foods-canteen.js",
+  "js/steps.js",
   "js/plan.js",
   "js/firebase-config.js",
   "js/firebase.js",
@@ -73,6 +75,20 @@ if (!appJs.includes("@amdocs\\.com") || !appJs.includes("/api/send-otp") || !ser
 }
 console.log("ok   Amdocs email, employee ID, and email reset are wired");
 
+if (!appJs.includes('if (id === "admin" && !adminToken()) { openPin(); return; }') ||
+    !server.includes("pbkdf2_hmac") || !server.includes("compare_digest") ||
+    !/def _style_image[\s\S]*?admin_token_ok/.test(server) || !server.includes("STYLE_NAME_RE.match(name)")) {
+  console.log("FAIL admin console PIN gate or protected style upload is missing");
+  process.exit(1);
+}
+console.log("ok   admin console needs a server-checked PIN; style uploads need the unlock token");
+
+if (!/KEYS\.style \+ session\(\)/.test(appSrc) || !/data-diary-add/.test(appSrc) || !/DIARY_MAX/.test(appSrc)) {
+  console.log("FAIL personal style diary is missing, unscoped per user, or uncapped");
+  process.exit(1);
+}
+console.log("ok   style diary is per user, capped, and open to every user (no admin PIN)");
+
 if (!/data-theme="light"/.test(css) || !/data-theme="dark"/.test(css)) {
   console.log("FAIL light/dark semantic theme selectors are missing");
   process.exit(1);
@@ -93,7 +109,7 @@ const ctx = { window: {}, console };
 ctx.window.window = ctx.window;
 vm.createContext(ctx);
 
-["js/foods.js", "js/foods-indian.js", "js/plan.js"].forEach((f) => {
+["js/foods.js", "js/foods-indian.js", "js/foods-canteen.js", "js/plan.js"].forEach((f) => {
   const src = fs.readFileSync(path.join(__dirname, f), "utf8");
   vm.runInContext(src.replace(/\bwindow\.AMFIT/g, "window.AMFIT"), ctx, { filename: f });
 });
@@ -112,6 +128,13 @@ ok(!ctx.window.AMFIT_LABEL_MAP.plate, "generic 'plate' label no longer auto-maps
 
 const indian = ["idli_sambar", "dosa_sambar", "masala_dosa", "upma", "poha", "pongal", "curd_rice", "rajma_chawal", "chicken_biryani", "thali"];
 indian.forEach((k) => ok(!!FOODS[k], "dish present: " + k));
+
+const MENU = ctx.window.AMFIT_CANTEEN_MENU;
+const aceKeys = MENU ? MENU.sections.reduce((a, s) => a.concat(s.keys), []) : [];
+ok(MENU && MENU.sections.length === 10, "ACE canteen menu has 10 sections");
+ok(aceKeys.length >= 55 && new Set(aceKeys).size === aceKeys.length, "ACE menu lists " + aceKeys.length + " unique dishes");
+ok(aceKeys.every((k) => FOODS[k] && FOODS[k].grams > 0 && / g$/.test(FOODS[k].serving)), "every ACE dish has a gram weight shown in its serving");
+ok(aceKeys.every((k) => k.indexOf("ace_") === 0), "ACE dishes are namespaced so they cannot overwrite catalog foods");
 
 Object.keys(FOODS).forEach((k) => {
   const f = FOODS[k];

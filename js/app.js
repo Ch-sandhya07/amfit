@@ -6,8 +6,11 @@
     daily: "amfit.daily.",
     shots: "amfit.shots.",
     fixes: "amfit.fixes.",
-    pins: "amfit.pins."
+    pins: "amfit.pins.",
+    style: "amfit.style."
   };
+  const STEP_SYNC_KEY = "amfit.stepSync";
+  let stepSyncNote = "";
   const $ = (id) => document.getElementById(id);
   let mode = "register";
   let net = null;
@@ -24,6 +27,11 @@
   let cloudReady = false;
   let cloudSigningIn = false;
   let sharedContent = {};
+  const ADMIN_KEY = "amfit.adminToken";
+  let styleVersion = Date.now();
+  let openStyleKey = null;
+  let pendingSlot = null;
+  let pinThen = null;
   const CODE_ALPHA = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
 
   function mealType(d) {
@@ -145,6 +153,7 @@
   function show(id) {
     const cloudOn = window.AMFIT_FIREBASE && AMFIT_FIREBASE.configured;
     if (id === "admin" && cloudOn && cloudRole !== "admin") id = "you";
+    if (id === "admin" && !adminToken()) { openPin(); return; }
     document.querySelectorAll(".screen").forEach((s) => s.classList.remove("on"));
     $("screen-" + id).classList.add("on");
     document.body.dataset.screen = id;
@@ -673,6 +682,30 @@
   function pinFood(p) { return (p && p.food) || (p && AMFIT_FOODS[p.key]) || null; }
   const isPinned = (key) => pins().some((p) => p.key === key);
   let pinEdit = false;
+  let menuOpen = false;
+  let menuSection = null;
+
+  // The full printed canteen menu, grouped like the card on the counter.
+  function menuBlock() {
+    const menu = window.AMFIT_CANTEEN_MENU;
+    if (!menu || !menu.sections.length) return "";
+    const total = menu.sections.reduce((a, s) => a + s.keys.length, 0);
+    return '<details class="ace-menu"' + (menuOpen ? " open" : "") + ">" +
+      "<summary><b>" + esc(menu.name) + " menu</b><span>" + total + " items · kcal + grams</span></summary>" +
+      menu.sections.map(function (s) {
+        return '<details class="ace-sec" data-sec="' + esc(s.name) + '"' + (menuSection === s.name ? " open" : "") + ">" +
+          "<summary>" + esc(s.name) + "<span>" + s.keys.length + "</span></summary>" +
+          s.keys.map(function (k) {
+            const f = AMFIT_FOODS[k];
+            return '<button type="button" class="ace-item" data-menu="' + esc(k) + '">' +
+              "<b>" + esc(f.name) + "</b>" +
+              "<span>" + Math.round(f.macros.kcal) + " kcal · " + f.grams + " g · " + Math.round(f.macros.protein) + " g P</span>" +
+              "</button>";
+          }).join("") + "</details>";
+      }).join("") +
+      '<p class="tiny">Tap a dish to log it now. Numbers are AMFIT estimates for a typical canteen portion.</p>' +
+      "</details>";
+  }
 
   // Pinned items have no photo, so stand in a tile with the dish initials.
   function tileThumb(name) {
@@ -681,12 +714,12 @@
     c.height = 160;
     const g = c.getContext("2d");
     const grad = g.createLinearGradient(0, 0, 160, 160);
-    grad.addColorStop(0, "#c6f23a");
+    grad.addColorStop(0, "#2dd4a0");
     grad.addColorStop(1, "#3dd68c");
     g.fillStyle = grad;
     g.fillRect(0, 0, 160, 160);
     const initials = String(name).split(/\s+/).slice(0, 2).map((w) => w[0] || "").join("").toUpperCase();
-    g.fillStyle = "#10160a";
+    g.fillStyle = "#04261c";
     g.font = "800 68px Outfit, sans-serif";
     g.textAlign = "center";
     g.textBaseline = "middle";
@@ -713,7 +746,8 @@
       (list.length
         ? '<button class="btn btn-ghost" type="button" id="btnPinEdit" style="margin-top:6px">' +
           (pinEdit ? "Done" : "Edit pins") + "</button>"
-        : "");
+        : "") +
+      menuBlock();
     if (list.length) {
       $("btnPinEdit").onclick = function () { pinEdit = !pinEdit; renderQuick(); };
     }
@@ -758,11 +792,26 @@
       renderQuick();
       return;
     }
+    const dish = e.target.closest("[data-menu]");
+    if (dish) {
+      const key = dish.getAttribute("data-menu");
+      if (AMFIT_FOODS[key]) quickLog({ key: key }, dish);
+      return;
+    }
     const hit = e.target.closest("[data-pin]");
     if (!hit || pinEdit) return;
     const p = pins()[parseInt(hit.getAttribute("data-pin"), 10)];
     if (p) quickLog(p, hit);
   });
+  // Logging re-renders the card, so remember which part of the menu was open.
+  $("quickCard").addEventListener("toggle", function (e) {
+    const d = e.target;
+    if (d.classList.contains("ace-menu")) menuOpen = d.open;
+    if (d.classList.contains("ace-sec")) {
+      if (d.open) menuSection = d.getAttribute("data-sec");
+      else if (menuSection === d.getAttribute("data-sec")) menuSection = null;
+    }
+  }, true);
 
   /* ---------- desk: chair hours, breaks, two-minute reset ---------- */
 
@@ -904,7 +953,7 @@
     // After 18:00 a half-empty protein ring breathes once — a nudge, not a lecture.
     const nudge = proteinPct < 0.5 && new Date().getHours() >= 18;
     const items = [
-      { pct: sum.kcal / t.kcal, colour: "#c6f23a", label: "Calories", sub: Math.round(sum.kcal) + "/" + t.kcal },
+      { pct: sum.kcal / t.kcal, colour: "#2dd4a0", label: "Calories", sub: Math.round(sum.kcal) + "/" + t.kcal },
       { pct: proteinPct, colour: "#4fd3e8", label: "Protein", sub: Math.round(sum.protein) + "/" + t.protein + "g", nudge: nudge },
       { pct: sum.fiber / t.fiber, colour: "#ffb03a", label: "Fibre", sub: Math.round(sum.fiber) + "/" + t.fiber + "g" },
       { pct: d.steps / t.steps, colour: "#a78bfa", label: "Steps", sub: d.steps.toLocaleString() }
@@ -924,7 +973,7 @@
 
   // Confetti takes the colour of the ring that closed.
   const PARTY_COLOURS = {
-    kcal: ["#c6f23a", "#d8ff5c", "#8bb82a", "#ffffff"],
+    kcal: ["#2dd4a0", "#7cf5cf", "#14a37c", "#ffffff"],
     protein: ["#4fd3e8", "#7ae7ff", "#2aa7bd", "#ffffff"],
     fiber: ["#ffb03a", "#ffd27a", "#e48720", "#ffffff"],
     steps: ["#a78bfa", "#c7b3ff", "#7c5cf0", "#ffffff"]
@@ -946,7 +995,7 @@
     sessionStorage.setItem(stampKey, "1");
     const layer = document.createElement("div");
     layer.className = "confetti";
-    const colours = PARTY_COLOURS[reason] || ["#c6f23a", "#4fd3e8", "#a78bfa", "#ff8a6b", "#ffffff"];
+    const colours = PARTY_COLOURS[reason] || ["#2dd4a0", "#4fd3e8", "#a78bfa", "#ff8a6b", "#ffffff"];
     for (let i = 0; i < 28; i++) {
       const piece = document.createElement("i");
       piece.className = "conf";
@@ -1054,6 +1103,11 @@
     $("stepsCard").innerHTML =
       '<div class="line"><b>Steps</b><span>' + d.steps.toLocaleString() + " / " + goal.toLocaleString() + "</span></div>" +
       '<div class="bar"><i style="width:' + pct + '%"></i></div>' +
+      (window.AMFIT_STEPS && AMFIT_STEPS.native
+        ? '<button class="btn btn-ghost" type="button" data-step="sync" style="margin:10px 0 4px">' +
+          (localStorage.getItem(STEP_SYNC_KEY) ? "Sync phone steps" : "Connect phone steps") + "</button>" +
+          '<p class="tiny" id="stepSyncNote">' + esc(stepSyncNote) + "</p>"
+        : "") +
       '<div class="step-btns">' +
         '<button type="button" data-step="500">+500</button>' +
         '<button type="button" data-step="1000">+1,000</button>' +
@@ -1061,7 +1115,9 @@
         '<button type="button" data-step="set">Set</button>' +
         '<button type="button" data-step="0">Reset</button>' +
       "</div>" +
-      '<p class="tiny">Goal from your activity level and target' + (t && t.ratePerWeek ? ", raised for fat loss" : "") + ". Browsers cannot read your phone's pedometer, so log the count from your watch or Health app.</p>";
+      '<p class="tiny">Goal from your activity level and target' + (t && t.ratePerWeek ? ", raised for fat loss" : "") + (window.AMFIT_STEPS && AMFIT_STEPS.native
+        ? ". Counts come from " + (AMFIT_STEPS.platform === "ios" ? "Apple Health" : "Health Connect") + "; the buttons below are only a fallback.</p>"
+        : ". A browser cannot read your phone's step count. Install the AMFIT phone app to sync it automatically, or log it here.</p>");
 
     if (t) {
       const w = AMFIT_PLAN.week(profile());
@@ -1081,10 +1137,32 @@
       : '<div class="empty art">' + ART.plate + "<p>Nothing logged yet. Tap + and photograph the plate.</p></div>";
   }
 
+  async function syncPhoneSteps(ask) {
+    if (!window.AMFIT_STEPS || !AMFIT_STEPS.native || !session()) return;
+    try {
+      if (ask) await AMFIT_STEPS.connect();
+      const n = await AMFIT_STEPS.todaySteps();
+      localStorage.setItem(STEP_SYNC_KEY, "1");
+      // Never lower a count the user entered by hand earlier today.
+      if (n > today().steps) patchToday({ steps: Math.min(100000, n) });
+      stepSyncNote = "Synced " + n.toLocaleString() + " steps at " + fmtTime(new Date()) + ".";
+    } catch (err) {
+      stepSyncNote = ask ? (err.message || "Could not read steps. Allow step access in your phone's health settings.") : "";
+    }
+    renderHome();
+  }
+  if (window.AMFIT_STEPS && AMFIT_STEPS.native) {
+    if (localStorage.getItem(STEP_SYNC_KEY)) setTimeout(() => syncPhoneSteps(false), 800);
+    document.addEventListener("visibilitychange", function () {
+      if (!document.hidden && localStorage.getItem(STEP_SYNC_KEY)) syncPhoneSteps(false);
+    });
+  }
+
   $("stepsCard").addEventListener("click", function (e) {
     const b = e.target.closest("[data-step]");
     if (!b) return;
     const v = b.getAttribute("data-step");
+    if (v === "sync") { syncPhoneSteps(true); return; }
     const cur = today().steps;
     if (v === "set") {
       const entered = window.prompt("Steps today", String(cur));
@@ -1125,7 +1203,8 @@
     document.querySelectorAll(".pose-strip .style-thumb").forEach(function (img) {
       const key = img.closest("[data-style]").getAttribute("data-style");
       const tip = AMFIT_PLAN.STYLE_TIPS[key] || {};
-      const queue = [img.getAttribute("data-src")].concat((tip.looks || []).map(function (l) { return l.img; }));
+      const queue = [img.getAttribute("data-src")].concat((tip.looks || []).map(function (l) { return l.img; }))
+        .map(function (src) { return src + "?v=" + styleVersion; });
       (function next(i) {
         if (i >= queue.length) { img.classList.add("hidden"); return; }
         img.onload = function () { img.classList.remove("hidden"); };
@@ -1137,13 +1216,23 @@
 
   // Each look owns an image slot. Missing files fall back to a labelled frame,
   // so the gallery stays useful before any photography exists.
+  function addPhotoBtn(name) {
+    return adminToken()
+      ? '<button type="button" class="photo-add" data-slot="' + esc(name) + '" title="Add picture" aria-label="Add picture">' +
+        '<svg class="icon"><use href="#i-plus"></use></svg></button>'
+      : "";
+  }
+  function slotName(path) {
+    return String(path || "").replace(/^img\/style\//, "").replace(/\.jpg$/, "");
+  }
   function looksBlock(looks) {
     if (!looks || !looks.length) return "";
     return '<h4>Poses &amp; styles</h4><div class="look-grid">' +
       looks.map(function (l, i) {
         return '<figure class="look" data-look="' + i + '">' +
           '<img class="hidden" alt="' + esc(l.label) + '">' +
-          '<span class="look-todo">Photo slot</span>' +
+          '<span class="look-todo">' + (adminToken() ? "Tap + to add" : "Photo coming soon") + "</span>" +
+          addPhotoBtn(slotName(l.img)) +
           "<figcaption><b>" + esc(l.label) + "</b><span>" + esc(l.cue) + "</span></figcaption>" +
           "</figure>";
       }).join("") + "</div>";
@@ -1151,26 +1240,212 @@
   function openStyle(key) {
     const tip = AMFIT_PLAN.STYLE_TIPS[key];
     if (!tip) return;
+    openStyleKey = key;
     $("styleKicker").textContent = tip.kicker;
     $("styleTitle").textContent = tip.title;
     $("styleLead").textContent = tip.lead;
     $("styleBody").innerHTML =
-      listBlock("Do this", tip.tips) + looksBlock(tip.looks) + listBlock("Fashion sense", tip.fashion);
+      (adminToken() ? '<div class="hero-slot"><span>Cover picture</span>' + addPhotoBtn(slotName(tip.img)) + "</div>" : "") +
+      listBlock("Do this", tip.tips) + diaryBlock(key) + looksBlock(tip.looks) + listBlock("Fashion sense", tip.fashion);
     $("styleBody").querySelectorAll(".look").forEach(function (fig) {
       const look = tip.looks[Number(fig.getAttribute("data-look"))];
       const img = fig.querySelector("img");
       img.onload = function () {
         img.classList.remove("hidden");
-        fig.querySelector(".look-todo").remove();
+        const todo = fig.querySelector(".look-todo");
+        if (todo) todo.remove();
       };
-      img.src = look.img;
+      img.src = look.img + "?v=" + styleVersion;
     });
     const hero = $("styleHero");
     hero.classList.add("hidden");
-    showImg(hero, tip.img, tip.title);
+    showImg(hero, tip.img + "?v=" + styleVersion, tip.title);
     $("styleFx").classList.remove("hidden");
   }
   function closeStyle() { $("styleFx").classList.add("hidden"); }
+
+  /* ---------- personal style diary: the user's own daily looks ---------- */
+
+  const DIARY_MAX = 30;
+  const styleDiary = () => read(KEYS.style + session(), "[]");
+  function saveStyleDiary(list) {
+    try {
+      localStorage.setItem(KEYS.style + session(), JSON.stringify(list));
+      return true;
+    } catch (e) {
+      window.alert("This browser's storage for AMFIT is full. Delete a few older diary photos and try again.");
+      return false;
+    }
+  }
+  function dayLabel(day) {
+    const now = new Date();
+    if (day === dayKey(now)) return "Today";
+    const y = new Date(now);
+    y.setDate(now.getDate() - 1);
+    if (day === dayKey(y)) return "Yesterday";
+    const d = new Date(day + "T12:00:00");
+    return d.toLocaleDateString([], { day: "numeric", month: "short" });
+  }
+  function diaryBlock(key) {
+    const mine = styleDiary().filter((e) => e.tile === key).sort((a, b) => b.id.localeCompare(a.id));
+    const todayDone = mine.some((e) => e.day === dayKey(new Date()));
+    return '<h4>My style diary</h4>' +
+      '<p class="tiny" style="margin-top:0">' +
+        (todayDone ? "Today's look is saved. Add more any time." : "Add a picture of today's look to track your style day by day.") +
+        " Stays on this device.</p>" +
+      '<div class="diary-grid">' +
+        '<button type="button" class="diary-add" data-diary-add="' + esc(key) + '" aria-label="Add a style picture">' +
+          '<svg class="icon"><use href="#i-plus"></use></svg><span>Add look</span></button>' +
+        mine.map(function (e) {
+          return '<figure class="diary-item">' +
+            '<img src="' + esc(e.img) + '" alt="My look, ' + esc(dayLabel(e.day)) + '">' +
+            "<figcaption>" + esc(dayLabel(e.day)) + "</figcaption>" +
+            '<button type="button" class="diary-del" data-diary-del="' + esc(e.id) + '" aria-label="Delete picture">×</button>' +
+            "</figure>";
+        }).join("") +
+      "</div>";
+  }
+  let pendingDiary = null;
+  $("diaryFile").addEventListener("change", async function () {
+    const file = this.files && this.files[0];
+    const tile = pendingDiary;
+    pendingDiary = null;
+    this.value = "";
+    if (!file || !tile) return;
+    const list = styleDiary();
+    if (list.length >= DIARY_MAX) {
+      window.alert("Your style diary holds " + DIARY_MAX + " pictures. Delete an older one first.");
+      return;
+    }
+    try {
+      const img = await shrinkToJpeg(file, 720, 0.72);
+      const now = new Date();
+      let id = String(now.getTime());
+      while (list.some((x) => x.id === id)) id += "1";
+      list.push({ id: id, day: dayKey(now), tile: tile, img: img });
+      if (saveStyleDiary(list) && openStyleKey) openStyle(openStyleKey);
+    } catch (err) {
+      window.alert(err.message || "Could not read that picture.");
+    }
+  });
+
+  /* ---------- admin PIN and style picture uploads ---------- */
+
+  function adminToken() {
+    try {
+      const t = JSON.parse(sessionStorage.getItem(ADMIN_KEY) || "null");
+      if (t && t.token && t.exp > Date.now()) return t.token;
+    } catch (e) { /* treat as locked */ }
+    sessionStorage.removeItem(ADMIN_KEY);
+    return "";
+  }
+  function lockAdmin() { sessionStorage.removeItem(ADMIN_KEY); }
+  function openPin(then) {
+    pinThen = then || function () { show("admin"); };
+    $("pinInput").value = "";
+    $("pinErr").textContent = "";
+    $("pinFx").classList.remove("hidden");
+    $("pinInput").focus();
+  }
+  function closePin() { $("pinFx").classList.add("hidden"); }
+  $("pinForm").addEventListener("submit", async function (e) {
+    e.preventDefault();
+    const pin = $("pinInput").value.trim();
+    if (!/^\d{6,10}$/.test(pin)) { $("pinErr").textContent = "Enter your 6–10 digit PIN."; return; }
+    $("pinGo").disabled = true;
+    try {
+      const res = await postJson("/api/admin-unlock", { pin: pin });
+      sessionStorage.setItem(ADMIN_KEY, JSON.stringify({ token: res.token, exp: Date.now() + res.ttl * 1000 }));
+      closePin();
+      const next = pinThen;
+      pinThen = null;
+      if (next) next();
+    } catch (err) {
+      $("pinErr").textContent = err.message || "Could not unlock. Is the AMFIT server running?";
+    } finally {
+      $("pinGo").disabled = false;
+      $("pinInput").value = "";
+    }
+  });
+  $("pinCancel").onclick = function () { pinThen = null; closePin(); };
+
+  function shrinkToJpeg(file, max, quality) {
+    return new Promise(function (resolve, reject) {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = function () {
+        const scale = Math.min(1, (max || 1400) / Math.max(img.width, img.height));
+        const c = document.createElement("canvas");
+        c.width = Math.round(img.width * scale);
+        c.height = Math.round(img.height * scale);
+        c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+        URL.revokeObjectURL(url);
+        resolve(c.toDataURL("image/jpeg", quality || 0.86));
+      };
+      img.onerror = function () { URL.revokeObjectURL(url); reject(new Error("That file is not a picture.")); };
+      img.src = url;
+    });
+  }
+  $("styleBody").addEventListener("click", function (e) {
+    const add = e.target.closest("[data-diary-add]");
+    if (add) {
+      pendingDiary = add.getAttribute("data-diary-add");
+      $("diaryFile").click();
+      return;
+    }
+    const del = e.target.closest("[data-diary-del]");
+    if (del) {
+      if (!window.confirm("Delete this picture from your style diary?")) return;
+      const id = del.getAttribute("data-diary-del");
+      if (saveStyleDiary(styleDiary().filter((x) => x.id !== id)) && openStyleKey) openStyle(openStyleKey);
+      return;
+    }
+    const b = e.target.closest(".photo-add");
+    if (!b) return;
+    pendingSlot = b.getAttribute("data-slot");
+    $("styleFile").value = "";
+    $("styleFile").click();
+  });
+  $("styleFile").addEventListener("change", async function () {
+    const file = this.files && this.files[0];
+    const slot = pendingSlot;
+    pendingSlot = null;
+    if (!file || !slot) return;
+    const btn = $("styleBody").querySelector('[data-slot="' + slot + '"]');
+    if (btn) btn.classList.add("busy");
+    try {
+      const image = await shrinkToJpeg(file);
+      const res = await fetch("/api/style-image", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-AMFIT-Admin": adminToken() },
+        body: JSON.stringify({ name: slot, image: image })
+      });
+      const json = await res.json().catch(function () { return {}; });
+      if (res.status === 401) {
+        lockAdmin();
+        openPin(function () { if (openStyleKey) openStyle(openStyleKey); });
+        return;
+      }
+      if (!res.ok || !json.ok) throw new Error(json.error || "Upload failed.");
+      styleVersion = Date.now();
+      if (openStyleKey) openStyle(openStyleKey);
+      bindStyleThumbs();
+    } catch (err) {
+      window.alert(err.message || "Upload failed.");
+    } finally {
+      if (btn) btn.classList.remove("busy");
+    }
+  });
+  $("adminLock").onclick = function () {
+    lockAdmin();
+    $("nav").classList.remove("hidden");
+    show("you");
+  };
+  $("adminOpenStyle").onclick = function () {
+    $("nav").classList.remove("hidden");
+    show("home");
+    openStyle("posture");
+  };
   document.querySelector(".pose-strip").addEventListener("click", function (e) {
     const b = e.target.closest("[data-style]");
     if (b) openStyle(b.getAttribute("data-style"));
@@ -1742,7 +2017,7 @@
     g.fillStyle = "#e8f0ea";
     g.font = "700 34px Outfit, sans-serif";
     g.fillText("AMFIT", pad, 118);
-    g.fillStyle = "#c6f23a";
+    g.fillStyle = "#2dd4a0";
     g.font = "800 104px Outfit, sans-serif";
     g.fillText("WEEK WRAP", pad, 232);
     g.fillStyle = "#94a89a";
@@ -1756,8 +2031,8 @@
     w.days.forEach(function (d) {
       g.beginPath();
       g.arc(x + 26, 372, 26, 0, Math.PI * 2);
-      if (d.logged) { g.fillStyle = "#c6f23a"; g.fill(); } else { g.strokeStyle = "#2c3a31"; g.lineWidth = 4; g.stroke(); }
-      g.fillStyle = d.logged ? "#10160a" : "#6d7d72";
+      if (d.logged) { g.fillStyle = "#2dd4a0"; g.fill(); } else { g.strokeStyle = "#2c3a31"; g.lineWidth = 4; g.stroke(); }
+      g.fillStyle = d.logged ? "#04261c" : "#6d7d72";
       g.font = "700 22px Outfit, sans-serif";
       g.textAlign = "center";
       g.fillText(d.label[0], x + 26, 380);
@@ -1766,10 +2041,10 @@
     });
 
     const cells = [
-      { v: String(w.streak), l: "DAY STREAK", c: "#c6f23a" },
+      { v: String(w.streak), l: "DAY STREAK", c: "#2dd4a0" },
       { v: w.loggedDays + "/7", l: "DAYS LOGGED", c: "#e8f0ea" },
       { v: w.proteinDays + "/7", l: "PROTEIN HIT", c: "#4fd3e8" },
-      { v: w.onTargetDays + "/7", l: "CALORIES ON TARGET", c: "#c6f23a" },
+      { v: w.onTargetDays + "/7", l: "CALORIES ON TARGET", c: "#2dd4a0" },
       { v: w.steps.toLocaleString(), l: "STEPS WALKED", c: "#a78bfa" },
       { v: String(w.sessions), l: "SESSIONS DONE", c: "#ff8a6b" }
     ];
@@ -1817,7 +2092,7 @@
       const s = Math.max(216 / img.width, 216 / img.height);
       g.drawImage(img, W - 200 - (img.width * s) / 2, 196 - (img.height * s) / 2, img.width * s, img.height * s);
       g.restore();
-      g.strokeStyle = "#c6f23a";
+      g.strokeStyle = "#2dd4a0";
       g.lineWidth = 6;
       g.beginPath();
       g.arc(W - 200, 196, 108, 0, Math.PI * 2);
@@ -2178,7 +2453,8 @@
         '<button class="btn btn-ghost" type="button" id="btnCodes">Generate recovery codes</button>') +
       ((cloud && cloudRole === "admin") || !cloud
         ? '<button class="btn btn-admin" type="button" id="btnAdmin">' +
-          (cloud ? "Open admin console" : "Open admin console (local preview)") + "</button>"
+          '<svg class="icon" style="vertical-align:-3px;margin-right:6px"><use href="#i-lock"></use></svg>' +
+          (adminToken() ? "Open admin console" : "Admin console · PIN required") + "</button>"
         : "") +
       '<button class="btn btn-ghost" type="button" id="btnEdit">Edit my numbers</button>' +
       '<button class="btn btn-danger" type="button" id="btnOut">Sign out</button>';
