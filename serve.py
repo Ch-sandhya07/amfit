@@ -22,6 +22,15 @@ from urllib.parse import urlparse
 ROOT = os.path.dirname(os.path.abspath(__file__))
 MAIL_PATH = os.path.join(ROOT, "mail.json")
 OTP_PATH = os.path.join(ROOT, "data", "otp.json")
+ADMIN_PATH = os.path.join(ROOT, "data", "admin.json")
+STYLE_DIR = os.path.join(ROOT, "img", "style")
+STYLE_NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+PIN_RE = re.compile(r"^\d{6,10}$")
+PIN_ITER = 200_000
+ADMIN_TTL = 1800
+PIN_MAX_FAILS = 5
+PIN_LOCKOUT = 300
+MAX_STYLE_BODY = 6 * 1024 * 1024
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 OTP_TTL = 600
 RESEND_WAIT = 60
@@ -162,6 +171,38 @@ def save_json(path: str, data) -> None:
     os.replace(tmp, path)
 
 
+def hash_pin(pin: str, salt: bytes) -> str:
+    return hashlib.pbkdf2_hmac("sha256", pin.encode("utf-8"), salt, PIN_ITER).hex()
+
+
+def set_admin_pin() -> None:
+    import getpass
+    pin = getpass.getpass("New admin PIN (6-10 digits): ").strip()
+    if not PIN_RE.match(pin):
+        sys.exit("PIN must be 6-10 digits.")
+    if getpass.getpass("Repeat PIN: ").strip() != pin:
+        sys.exit("PINs did not match.")
+    salt = secrets.token_bytes(16)
+    save_json(ADMIN_PATH, {"salt": salt.hex(), "hash": hash_pin(pin, salt)})
+    print("Admin PIN saved (hash only) to data/admin.json.")
+
+
+# Unlock tokens and failure counters live in memory, so a restart signs admins out.
+_admin_tokens: dict = {}
+_pin_fails = {"count": 0, "until": 0.0}
+
+
+def admin_token_ok(token: str) -> bool:
+    if not token:
+        return False
+    with _lock:
+        exp = _admin_tokens.get(digest(token))
+        if exp and exp > time.time():
+            return True
+        _admin_tokens.pop(digest(token), None)
+    return False
+
+
 def send_mail(cfg: dict, to_addr: str, otp: str) -> None:
     host = str(cfg["host"])
     port = int(cfg.get("port") or 587)
@@ -218,7 +259,79 @@ class Handler(SimpleHTTPRequestHandler):
         if path == "/api/edit":
             self._edit()
             return
+        if path == "/api/admin-unlock":
+            self._admin_unlock()
+            return
+        if path == "/api/admin-check":
+            self._write_json(200, {"ok": admin_token_ok(self.headers.get("X-AMFIT-Admin", ""))})
+            return
+        if path == "/api/style-image":
+            self._style_image()
+            return
         self.send_error(404)
+
+    def _admin_unlock(self) -> None:
+        try:
+            data = self._read_json()
+        except (ValueError, json.JSONDecodeError, UnicodeDecodeError):
+            self._write_json(400, {"ok": False, "error": "Invalid request."})
+            return
+        cfg = load_json(ADMIN_PATH, None)
+        if not isinstance(cfg, dict) or not cfg.get("salt") or not cfg.get("hash"):
+            self._write_json(503, {"ok": False, "error": "No admin PIN yet. Run: python serve.py --set-pin"})
+            return
+        now = time.time()
+        with _lock:
+            if _pin_fails["until"] > now:
+                wait = int(_pin_fails["until"] - now) + 1
+                self._write_json(429, {"ok": False, "error": "Too many wrong PINs. Try again in %ss." % wait})
+                return
+        pin = str(data.get("pin") or "").strip()
+        good = PIN_RE.match(pin) is not None and secrets.compare_digest(
+            hash_pin(pin, bytes.fromhex(cfg["salt"])), cfg["hash"])
+        with _lock:
+            if not good:
+                _pin_fails["count"] += 1
+                if _pin_fails["count"] >= PIN_MAX_FAILS:
+                    _pin_fails["count"] = 0
+                    _pin_fails["until"] = now + PIN_LOCKOUT
+                self._write_json(401, {"ok": False, "error": "Wrong PIN."})
+                return
+            _pin_fails["count"] = 0
+            token = secrets.token_urlsafe(32)
+            _admin_tokens[digest(token)] = now + ADMIN_TTL
+        self._write_json(200, {"ok": True, "token": token, "ttl": ADMIN_TTL})
+
+    def _style_image(self) -> None:
+        if not admin_token_ok(self.headers.get("X-AMFIT-Admin", "")):
+            self._write_json(401, {"ok": False, "error": "Admin PIN required. Unlock the admin console again."})
+            return
+        try:
+            data = self._read_json(MAX_STYLE_BODY)
+        except (ValueError, json.JSONDecodeError, UnicodeDecodeError):
+            self._write_json(400, {"ok": False, "error": "Picture is too large or invalid."})
+            return
+        name = str(data.get("name") or "")
+        image = str(data.get("image") or "")
+        prefix = "data:image/jpeg;base64,"
+        if not STYLE_NAME_RE.match(name) or not image.startswith(prefix):
+            self._write_json(400, {"ok": False, "error": "Invalid picture slot."})
+            return
+        try:
+            raw = base64.b64decode(image[len(prefix):], validate=True)
+        except ValueError:
+            self._write_json(400, {"ok": False, "error": "Picture data is corrupt."})
+            return
+        if len(raw) < 800 or not raw.startswith(b"\xff\xd8"):
+            self._write_json(400, {"ok": False, "error": "Only JPEG pictures are accepted."})
+            return
+        os.makedirs(STYLE_DIR, exist_ok=True)
+        target = os.path.join(STYLE_DIR, name + ".jpg")
+        tmp = target + ".tmp"
+        with open(tmp, "wb") as handle:
+            handle.write(raw)
+        os.replace(tmp, target)
+        self._write_json(200, {"ok": True, "path": "img/style/" + name + ".jpg"})
 
     def _search_foods(self, parsed) -> None:
         qs = urllib.parse.parse_qs(parsed.query)
@@ -487,6 +600,9 @@ class Handler(SimpleHTTPRequestHandler):
 
 def main() -> None:
     port = 8765
+    if len(sys.argv) > 1 and sys.argv[1] == "--set-pin":
+        set_admin_pin()
+        return
     if len(sys.argv) > 1:
         port = int(sys.argv[1])
     os.chdir(ROOT)
