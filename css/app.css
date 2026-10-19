@@ -409,6 +409,14 @@ html[data-theme="light"] .style-fx { background: rgba(226, 238, 236, 0.88); }
   text-align: center; font: 600 22px var(--mono); letter-spacing: .4em; margin-top: 6px;
 }
 
+.qty-row { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
+.qty-row input { width: 120px; margin: 0; font: 600 20px var(--mono); text-align: center; }
+.qty-row button {
+  min-width: 52px; height: 44px; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--bg-2); color: var(--text); font: 600 15px var(--font); cursor: pointer;
+}
+.qty-row button.on { background: var(--lime); color: #04261c; border-color: transparent; }
+
 .diary-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 8px 0 4px; }
 .diary-add, .diary-item {
   position: relative; aspect-ratio: 3 / 4; margin: 0; border-radius: 14px; overflow: hidden;

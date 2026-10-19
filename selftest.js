@@ -124,6 +124,8 @@ ok(FOODS.idli_sambar, "idli_sambar exists");
 ok(FOODS.idli_sambar.macros.protein < 14, "idli+sambar protein is realistic: " + FOODS.idli_sambar.macros.protein + " g");
 ok(FOODS.default_dinner.macros.protein <= 16, "unconfirmed dinner no longer claims 36 g protein: " + FOODS.default_dinner.macros.protein + " g");
 ok(/Unconfirmed/.test(FOODS.default_dinner.name), "fallback is labelled unconfirmed");
+ok(/renderNotFood/.test(appSrc) && !/pickFood\(preds,\s*meal\)/.test(appSrc), "an unrecognised photo is not logged as a meal");
+ok(/data-unit="ml"/.test(appSrc) && /baseFood/.test(appSrc) && /portionOf/.test(appSrc), "a logged dish can be resized in g, ml, or L from its catalog portion");
 ok(!ctx.window.AMFIT_LABEL_MAP.plate, "generic 'plate' label no longer auto-maps to a meal estimate");
 
 const indian = ["idli_sambar", "dosa_sambar", "masala_dosa", "upma", "poha", "pongal", "curd_rice", "rajma_chawal", "chicken_biryani", "thali"];

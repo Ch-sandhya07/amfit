@@ -15,6 +15,7 @@
   let mode = "register";
   let net = null;
   let stream = null;
+  let camTicket = 0;
   let resultBack = "home";
   let activeId = null;
   let trainDay = new Date().getDay();
@@ -770,6 +771,7 @@
       meal: mealType(when),
       foodKey: p.key,
       food: f,
+      baseFood: f,
       detected: "canteen pin",
       confirmed: true,
       thumb: tileThumb(f.name)
@@ -2542,15 +2544,61 @@
     $("cam").style.display = "block";
     $("scanBar").style.display = "none";
     $("btnCapture").disabled = false;
-    if (stream) return;
+    if (stream && stream.getVideoTracks().some((t) => t.readyState === "live")) return;
+    stream = null;
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      $("cam").style.display = "none";
+      $("scanStatus").textContent = window.isSecureContext
+        ? "Tap Capture to open your phone camera."
+        : "Live preview needs an https:// link. Tap Capture to open your phone camera instead.";
+      return;
+    }
+    const ticket = ++camTicket;
+    let s;
     try {
-      stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false });
-      $("cam").srcObject = stream;
+      try {
+        s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } }, audio: false });
+      } catch (err) {
+        // Laptops often reject the rear-camera hint; any camera will do.
+        if (err.name !== "OverconstrainedError" && err.name !== "NotFoundError") throw err;
+        s = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      }
     } catch (err) {
-      $("scanStatus").textContent = "Camera blocked. Use a photo from your library instead.";
+      if (ticket !== camTicket) return;
+      $("cam").style.display = "none";
+      $("scanStatus").textContent = camError(err);
+      return;
+    }
+    // The user may have left Scan while the permission prompt was open.
+    if (ticket !== camTicket || !$("screen-scan").classList.contains("on")) {
+      s.getTracks().forEach((t) => t.stop());
+      return;
+    }
+    stream = s;
+    const v = $("cam");
+    v.srcObject = stream;
+    stream.getVideoTracks().forEach((t) => t.addEventListener("ended", function () {
+      if (stream === s) { stream = null; $("scanStatus").textContent = "Camera stopped. Leave Scan and come back to restart it."; }
+    }));
+    try { await v.play(); } catch (e) { /* autoplay attribute covers most browsers */ }
+  }
+  function camError(err) {
+    switch (err && err.name) {
+      case "NotAllowedError":
+      case "SecurityError":
+        return "Live camera permission is off. Tap Capture to use your camera app, or allow the camera for this site in browser settings and reopen Scan.";
+      case "NotReadableError":
+      case "AbortError":
+        return "The camera is busy in another app (Teams, Zoom). Close it there, or tap Capture to use your camera app.";
+      case "NotFoundError":
+      case "OverconstrainedError":
+        return "No live camera found. Tap Capture to use your camera app, or Use photo for the gallery.";
+      default:
+        return "Live camera could not start. Tap Capture to use your camera app.";
     }
   }
   function stopCam() {
+    camTicket++;
     if (!stream) return;
     stream.getTracks().forEach((t) => t.stop());
     stream = null;
@@ -2575,8 +2623,10 @@
     return c.toDataURL("image/jpeg", 0.6);
   }
 
+  // fileIn opens the gallery; camIn opens the phone's own camera app, which
+  // works on iOS and Android even where live preview is not allowed.
   $("btnUpload").onclick = () => $("fileIn").click();
-  $("fileIn").onchange = function () {
+  $("fileIn").onchange = $("camIn").onchange = function () {
     const f = this.files && this.files[0];
     if (!f) return;
     const url = URL.createObjectURL(f);
@@ -2587,7 +2637,11 @@
   };
   $("btnCapture").onclick = function () {
     const v = $("cam");
-    if (!v.videoWidth) { $("fileIn").click(); return; }
+    if (!v.videoWidth) {
+      if (stream) { $("scanStatus").textContent = "Camera is still starting. Try Capture again in a second."; return; }
+      $("camIn").click();
+      return;
+    }
     const c = document.createElement("canvas");
     c.width = v.videoWidth; c.height = v.videoHeight;
     c.getContext("2d").drawImage(v, 0, 0);
@@ -2603,17 +2657,18 @@
     return net;
   }
 
-  function pickFood(preds, meal) {
+  function pickFood(preds) {
     const learned = fixes();
-    const fallback = { key: AMFIT_MEAL_DEFAULTS[meal], sure: false, label: "not identified" };
-    if (!preds || !preds.length) return fallback;
+    if (!preds || !preds.length) return { sure: false, label: "not identified" };
     for (const p of preds) {
       const slug = p.className.split(",")[0].trim().toLowerCase().replace(/\s+/g, "_");
-      if (learned[slug] && AMFIT_FOODS[learned[slug]]) return { key: learned[slug], sure: true, label: slug };
+      if (learned[slug] && AMFIT_FOODS[learned[slug]] && p.probability >= 0.2) return { key: learned[slug], sure: true, label: slug };
       const key = AMFIT_LABEL_MAP[slug];
-      if (key && AMFIT_FOODS[key] && p.probability >= 0.15) return { key, sure: true, label: slug };
+      // Meal-sized stand-ins are not a real identification.
+      if (key && key.indexOf("default_") === 0) continue;
+      if (key && AMFIT_FOODS[key] && p.probability >= 0.25) return { key: key, sure: true, label: slug };
     }
-    return { key: fallback.key, sure: false, label: preds[0].className.split(",")[0] };
+    return { sure: false, label: preds[0].className.split(",")[0] };
   }
 
   async function analyze(img) {
@@ -2630,7 +2685,21 @@
       const model = await loadNet();
       if (model) preds = await model.classify(img, 5);
     } catch (err) { preds = null; }
-    const picked = pickFood(preds, meal);
+    const picked = pickFood(preds);
+    $("btnCapture").disabled = false;
+    if (!picked.sure) {
+      setTimeout(function () {
+        renderNotFood({
+          meal: meal,
+          time: fmtTime(when),
+          iso: when.toISOString(),
+          day: dayKey(when),
+          detected: picked.label,
+          thumb: resize(img, 360)
+        });
+      }, 400);
+      return;
+    }
     const entry = {
       id: String(when.getTime()),
       day: dayKey(when),
@@ -2639,6 +2708,7 @@
       meal,
       foodKey: picked.key,
       food: AMFIT_FOODS[picked.key],
+      baseFood: AMFIT_FOODS[picked.key],
       detected: picked.label,
       confirmed: picked.sure,
       thumb: resize(img, 360)
@@ -2652,9 +2722,71 @@
 
   /* ---------- result + fix food ---------- */
 
+  let pendingScan = null;
+
+  function renderNotFood(shot) {
+    activeId = null;
+    pendingScan = shot;
+    $("resultSub").textContent = "Not logged";
+    $("resultCard").innerHTML =
+      '<img class="result-photo" src="' + shot.thumb + '" alt="Photo that was not logged">' +
+      '<span class="badge">' + esc(shot.meal) + "</span>" +
+      '<span class="badge">' + esc(shot.time) + "</span>" +
+      '<span class="badge">not food</span>' +
+      "<h3 style='margin:12px 0 4px'>This does not look like food</h3>" +
+      '<p class="tiny">Nothing was added to today\u2019s log, so no calories or nutrients were counted. ' +
+      "If it really is a meal, search for the dish below. Otherwise retake the photo.</p>" +
+      '<button class="btn btn-primary" type="button" id="btnRetake">Retake photo</button>' +
+      '<button class="btn btn-ghost" type="button" id="btnBack">Back home</button>';
+    show("result");
+    $("pickerWrap").classList.remove("hidden");
+    $("pickSearch").value = "";
+    renderPicker("");
+    $("pickSearch").focus();
+    $("btnRetake").onclick = function () { pendingScan = null; show("scan"); };
+    $("btnBack").onclick = function () { pendingScan = null; show("home"); };
+  }
+
+  function cloneFood(f) {
+    return Object.assign({}, f, { macros: Object.assign({}, f.macros), micros: Object.assign({}, f.micros || {}) });
+  }
+  // The catalog portion is the last weight written on the serving, such as "(118g)" or "250 ml".
+  function portionBase(food) {
+    const hits = String(food.serving || "").match(/(\d+(?:\.\d+)?)\s*(kg|g|ml|l)\b/ig) || [];
+    const last = hits.length ? hits[hits.length - 1].match(/(\d+(?:\.\d+)?)\s*(kg|g|ml|l)/i) : null;
+    if (food.grams > 0 && !/ml|l/i.test(last && last[2])) return { amount: food.grams, unit: "g", known: true };
+    if (!last) return { amount: 100, unit: "g", known: false };
+    let n = parseFloat(last[1]);
+    let u = last[2].toLowerCase();
+    if (u === "kg") { n *= 1000; u = "g"; }
+    if (u === "l") { n *= 1000; u = "ml"; }
+    return { amount: n, unit: u, known: true };
+  }
+  function portionOf(base, qty, unit) {
+    const food = cloneFood(base);
+    const known = portionBase(base).amount;
+    const wanted = unit === "l" ? qty * 1000 : qty;
+    const factor = known > 0 ? wanted / known : 1;
+    Object.keys(food.macros).forEach(function (k) {
+      const n = (base.macros[k] || 0) * factor;
+      food.macros[k] = k === "kcal" ? Math.round(n) : Math.round(n * 10) / 10;
+    });
+    Object.keys(food.micros).forEach(function (k) {
+      food.micros[k] = Math.round((base.micros[k] || 0) * factor * 100) / 100;
+    });
+    const shown = unit === "l" ? qty + " L" : (Math.round(qty * 10) / 10) + " " + unit;
+    food.serving = shown + " · scaled from " + base.serving;
+    return food;
+  }
+
   function renderResult(entry, subtitle) {
     activeId = entry.id;
     const m = entry.food.macros;
+    const base = entry.baseFood || entry.food;
+    const sized = portionBase(base);
+    const qty = entry.qty || sized.amount;
+    const unit = entry.unit || sized.unit;
+    const canSize = entry.confirmed && String(entry.foodKey || "").indexOf("default_") !== 0;
     $("resultSub").textContent = subtitle || "Item details";
     $("pickerWrap").classList.add("hidden");
     const micros = AMFIT_MICRO_META.map((x) => {
@@ -2672,6 +2804,17 @@
       '<p class="tiny">' + esc(entry.food.serving) + "</p>" +
       (entry.confirmed ? "" : '<p class="tiny" style="color:var(--warn)">The photo model could not name this dish, so these are placeholder numbers for a ' + entry.meal.toLowerCase() + '. Search the catalog or USDA below.</p>') +
       (entry.food.source ? '<p class="tiny">Nutrient source: ' + esc(entry.food.source) + "</p>" : "") +
+      (canSize
+        ? '<label for="qtyInput">Amount, if you want to change it</label>' +
+          '<div class="qty-row">' +
+            '<input id="qtyInput" type="number" inputmode="decimal" min="0.05" step="' + (unit === "l" ? "0.05" : "1") + '" value="' + (entry.qty ? qty : "") + '" placeholder="' + qty + '">' +
+            '<button type="button" data-unit="g"' + (unit === "g" ? ' class="on"' : "") + '>g</button>' +
+            '<button type="button" data-unit="ml"' + (unit === "ml" ? ' class="on"' : "") + '>ml</button>' +
+            '<button type="button" data-unit="l"' + (unit === "l" ? ' class="on"' : "") + '>L</button>' +
+          "</div>" +
+          '<p class="tiny">Optional. Leave it blank and the usual portion stays (' + sized.amount + " " + sized.unit +
+          "). Fill it only if you had a different amount. 1 ml is counted like 1 g.</p>"
+        : "") +
       "<h3 style='margin:14px 0 6px'>Macros</h3>" +
       '<div class="macro-grid" style="margin:0 0 10px;grid-template-columns:repeat(4,1fr)">' +
         '<div class="stat kcal"><b>' + Math.round(m.kcal) + "</b><span>kcal</span></div>" +
@@ -2716,6 +2859,38 @@
       $("pickSearch").focus();
     };
     if (!entry.confirmed) { $("pickerWrap").classList.remove("hidden"); renderPicker(""); }
+    if (canSize) {
+      const input = $("qtyInput");
+      input.dataset.unit = unit;
+      function applyQty(nextUnit) {
+        const u = nextUnit || input.dataset.unit || "g";
+        if (String(input.value).trim() === "") return;
+        const raw = parseFloat(input.value);
+        const max = u === "l" ? 5 : 5000;
+        if (!(raw > 0) || raw > max) { input.value = ""; return; }
+        const list = logs();
+        const i = list.findIndex(function (x) { return x.id === entry.id; });
+        if (i < 0) return;
+        if (!list[i].baseFood) list[i].baseFood = cloneFood(base);
+        list[i].qty = raw;
+        list[i].unit = u;
+        list[i].food = portionOf(list[i].baseFood, raw, u);
+        saveLogs(list);
+        renderResult(list[i], "Amount updated · today's totals changed");
+      }
+      input.addEventListener("change", function () { applyQty(); });
+      $("resultCard").querySelectorAll("[data-unit]").forEach(function (b) {
+        b.onclick = function () {
+          const next = b.getAttribute("data-unit");
+          input.dataset.unit = next;
+          if (String(input.value).trim() === "") return;
+          const prev = unit;
+          const ml = prev === "l" ? parseFloat(input.value) * 1000 : parseFloat(input.value);
+          if (ml > 0) input.value = String(next === "l" ? Math.round(ml) / 1000 : Math.round(ml));
+          applyQty(next);
+        };
+      });
+    }
   }
 
   let usdaHits = {};
@@ -2775,9 +2950,47 @@
     pickTimer = setTimeout(function () { renderPicker(q); }, 320);
   };
 
+  function logChosenFood(foodKey, food, sourceNote) {
+    const when = pendingScan;
+    const id = String(Date.now());
+    const entry = {
+      id: id,
+      day: when.day,
+      time: when.time,
+      iso: when.iso,
+      meal: when.meal,
+      foodKey: foodKey,
+      food: food,
+      baseFood: food,
+      detected: when.detected,
+      confirmed: true,
+      thumb: when.thumb
+    };
+    const list = logs();
+    list.push(entry);
+    saveLogs(list);
+    pendingScan = null;
+    activeId = id;
+    renderResult(entry, sourceNote);
+  }
+
   $("pickList").addEventListener("click", function (e) {
     const fdcBtn = e.target.closest("[data-fdc]");
     const keyBtn = e.target.closest("[data-key]");
+    if (pendingScan && !activeId) {
+      if (fdcBtn) {
+        const food = usdaHits[fdcBtn.getAttribute("data-fdc")];
+        if (!food) return;
+        logChosenFood("fdc_" + food.fdcId, food, "Logged from USDA FoodData Central");
+        return;
+      }
+      if (!keyBtn) return;
+      const key = keyBtn.getAttribute("data-key");
+      const food = Object.assign({}, AMFIT_FOODS[key]);
+      if (food && !food.source) food.source = "AMFIT catalog (typical serving)";
+      logChosenFood(key, food, "Logged from the catalog");
+      return;
+    }
     if (!activeId) return;
     const list = logs();
     const i = list.findIndex((x) => x.id === activeId);
