@@ -600,14 +600,30 @@ class Handler(SimpleHTTPRequestHandler):
 
 def main() -> None:
     port = 8765
-    if len(sys.argv) > 1 and sys.argv[1] == "--set-pin":
+    args = sys.argv[1:]
+    if args and args[0] == "--set-pin":
         set_admin_pin()
         return
-    if len(sys.argv) > 1:
-        port = int(sys.argv[1])
+    # --lan lets a phone on the same Wi-Fi open AMFIT; off by default so the
+    # server is not reachable from the network unless asked.
+    lan = "--lan" in args
+    args = [a for a in args if a != "--lan"]
+    if args:
+        port = int(args[0])
     os.chdir(ROOT)
-    httpd = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    httpd = ThreadingHTTPServer(("0.0.0.0" if lan else "127.0.0.1", port), Handler)
     print("AMFIT at http://127.0.0.1:%s" % port)
+    if lan:
+        import socket
+        probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            probe.connect(("10.255.255.255", 1))
+            ip = probe.getsockname()[0]
+        except OSError:
+            ip = "<this-PC-IP>"
+        finally:
+            probe.close()
+        print("On your phone (same Wi-Fi): http://%s:%s" % (ip, port))
     httpd.serve_forever()
 
 
