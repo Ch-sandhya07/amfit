@@ -2724,25 +2724,54 @@
 
   let pendingScan = null;
 
+  // The on-device photo model is trained on general categories and has no
+  // idli, dosa, or most Indian dishes, so these are offered as one-tap picks.
+  const LIKELY_BY_MEAL = {
+    Breakfast: ["idli_sambar", "dosa_sambar", "masala_dosa", "medu_vada", "upma", "pongal", "poha", "uttapam", "paratha_curd", "poori_sabzi"],
+    Brunch: ["idli_sambar", "dosa_sambar", "masala_dosa", "upma", "poha", "pongal", "medu_vada", "uttapam", "paratha_curd", "sandwich"],
+    Lunch: ["thali", "sambar_rice", "curd_rice", "dal_rice", "roti_dal", "chapati_sabzi", "veg_biryani", "chicken_biryani", "rajma_chawal", "masala_dosa"],
+    Snack: ["samosa", "medu_vada", "chai_biscuit", "filter_coffee", "masala_dosa", "idli_sambar", "pav_bhaji", "buttermilk", "banana", "sandwich"],
+    Dinner: ["chapati_sabzi", "roti_dal", "dal_rice", "dosa_sambar", "idli_sambar", "khichdi", "paneer_roti", "chicken_curry_roti", "veg_biryani", "curd_rice"],
+    "Late night": ["idli_sambar", "dosa_sambar", "curd_rice", "khichdi", "banana", "buttermilk", "sandwich", "upma", "poha", "chai_biscuit"]
+  };
+  // Container and scene labels say nothing about which dish it is, so a fix
+  // must not teach AMFIT that every plate is idli.
+  const GENERIC_LABELS = ["plate", "tray", "mixing_bowl", "soup_bowl", "dining_table", "restaurant", "wok", "frying_pan", "spatula", "ladle", "menu", "not identified"];
+
   function renderNotFood(shot) {
     activeId = null;
     pendingScan = shot;
-    $("resultSub").textContent = "Not logged";
+    const keys = (LIKELY_BY_MEAL[shot.meal] || LIKELY_BY_MEAL.Lunch).filter(function (k) { return AMFIT_FOODS[k]; });
+    $("resultSub").textContent = "Not logged yet";
     $("resultCard").innerHTML =
-      '<img class="result-photo" src="' + shot.thumb + '" alt="Photo that was not logged">' +
+      '<img class="result-photo" src="' + shot.thumb + '" alt="Photo waiting for a dish name">' +
       '<span class="badge">' + esc(shot.meal) + "</span>" +
       '<span class="badge">' + esc(shot.time) + "</span>" +
-      '<span class="badge">not food</span>' +
-      "<h3 style='margin:12px 0 4px'>This does not look like food</h3>" +
-      '<p class="tiny">Nothing was added to today\u2019s log, so no calories or nutrients were counted. ' +
-      "If it really is a meal, search for the dish below. Otherwise retake the photo.</p>" +
-      '<button class="btn btn-primary" type="button" id="btnRetake">Retake photo</button>' +
+      '<span class="badge">dish not named</span>' +
+      "<h3 style='margin:12px 0 4px'>Which dish is this?</h3>" +
+      '<p class="tiny">The photo model could not name it. It does not know many Indian dishes, such as idli or dosa. ' +
+      "Nothing is counted until you choose. If it is not food, tap Retake photo.</p>" +
+      '<div class="likely-grid">' +
+        keys.map(function (k) {
+          const f = AMFIT_FOODS[k];
+          return '<button type="button" class="likely" data-key="' + esc(k) + '"><b>' + esc(f.name) + "</b><span>" + Math.round(f.macros.kcal) + " kcal</span></button>";
+        }).join("") +
+      "</div>" +
+      '<p class="tiny">Not here? Search below. AMFIT remembers what you pick for similar photos.</p>' +
+      '<button class="btn btn-ghost" type="button" id="btnRetake">Retake photo</button>' +
       '<button class="btn btn-ghost" type="button" id="btnBack">Back home</button>';
     show("result");
     $("pickerWrap").classList.remove("hidden");
     $("pickSearch").value = "";
     renderPicker("");
-    $("pickSearch").focus();
+    $("resultCard").querySelectorAll(".likely[data-key]").forEach(function (b) {
+      b.onclick = function () {
+        const key = b.getAttribute("data-key");
+        const food = cloneFood(AMFIT_FOODS[key]);
+        if (!food.source) food.source = "AMFIT catalog (typical serving)";
+        logChosenFood(key, food, "Logged · " + food.name);
+      };
+    });
     $("btnRetake").onclick = function () { pendingScan = null; show("scan"); };
     $("btnBack").onclick = function () { pendingScan = null; show("home"); };
   }
@@ -2969,6 +2998,12 @@
     const list = logs();
     list.push(entry);
     saveLogs(list);
+    const label = String(when.detected || "").toLowerCase().replace(/\s+/g, "_");
+    if (label && AMFIT_FOODS[foodKey] && GENERIC_LABELS.indexOf(label) < 0) {
+      const f = fixes();
+      f[label] = foodKey;
+      saveFixes(f);
+    }
     pendingScan = null;
     activeId = id;
     renderResult(entry, sourceNote);
