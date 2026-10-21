@@ -125,6 +125,8 @@ ok(FOODS.idli_sambar.macros.protein < 14, "idli+sambar protein is realistic: " +
 ok(FOODS.default_dinner.macros.protein <= 16, "unconfirmed dinner no longer claims 36 g protein: " + FOODS.default_dinner.macros.protein + " g");
 ok(/Unconfirmed/.test(FOODS.default_dinner.name), "fallback is labelled unconfirmed");
 ok(/renderNotFood/.test(appSrc) && !/pickFood\(preds,\s*meal\)/.test(appSrc), "an unrecognised photo is not logged as a meal");
+ok(/LIKELY_BY_MEAL/.test(appSrc) && /GENERIC_LABELS/.test(appSrc) && !/This does not look like food/.test(appSrc), "unnamed Indian dishes get one-tap picks instead of a not-food message");
+ok(["idli_sambar", "dosa_sambar", "masala_dosa", "thali", "chapati_sabzi", "samosa", "sandwich", "banana"].every((k) => FOODS[k]), "quick dish picks resolve to real foods");
 ok(/data-unit="ml"/.test(appSrc) && /baseFood/.test(appSrc) && /portionOf/.test(appSrc), "a logged dish can be resized in g, ml, or L from its catalog portion");
 ok(!ctx.window.AMFIT_LABEL_MAP.plate, "generic 'plate' label no longer auto-maps to a meal estimate");
 
